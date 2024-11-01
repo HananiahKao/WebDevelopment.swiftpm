@@ -4,7 +4,10 @@ import WebKit
 struct ContentView: View {
     @ObservedObject var datasets: DataSets
     @Binding var dataSet: DataSet
-    
+    @State var msg = ""
+    @State private var showPopOver = false
+    @State private var showAlert = false
+    @State private var Beautified = false
     @Environment(\.dynamicTypeSize) var dynamicTypeSize
     enum screen {
         case code
@@ -42,18 +45,18 @@ struct ContentView: View {
                             .padding(.leading,15*Scales[dynamicTypeSize]!)
                     }
                     TextEditor(text: $dataSet.html)
-                    .font(.custom("menlo", size: 15))
-                    .onChange(of: dataSet.html) {
-                        datasets.save()
-                    }
-                    .onChange(of: dataSet.link) {
-                        dataSet.html = "loading HTML..."
-                        Task {
-                            let text = await makeHTML(dataSet.link)
-                            dataSet.html = beautify(text)
+                        .font(.custom("menlo", size: 15))
+                        .onChange(of: dataSet.html) {
+                            datasets.save()
                         }
-                        
-                    }
+                        .onChange(of: dataSet.link) {
+                            dataSet.html = "loading HTML..."
+                            Task {
+                                let text = await getHTML(dataSet.link)
+                                dataSet.html = await beautify(text)
+                            }
+                            
+                        }
                 }
             }
             if scr == .both {
@@ -90,6 +93,55 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: dataSet.link) {
+            datasets.save()
+            var htmlOriginal = ""
+            msg = "Getting HTML from \(dataSet.link)"
+            Task {
+                htmlOriginal = await getHTML(dataSet.link)
+            }
+            msg = "Beautifying HTML..."
+            Task {
+                let html = await beautify(htmlOriginal)
+                Beautified = true
+                dataSet.html = html
+            }
+                msg = ""
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    Beautified = false
+                }
+        }
+        .onChange(of: dataSet.html) { old, new in
+            datasets.save()
+            if new.count-old.count > 1 && !Beautified{
+                showAlert = true
+                Beautified = true
+            }
+        }
+        .alert("Do You Want To Beautify The HTML Code You Have Pasted?", isPresented: $showAlert) {
+            Button("cancel") {
+                showAlert = false
+            }
+            Button("beautify") {
+                let html = dataSet.html
+                Task {
+                    dataSet.html = await beautify(html)
+                }
+                showAlert = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    Beautified = false
+                }
+            }
+        }
+        .overlay {
+            if !msg.isEmpty {
+                HStack {
+                    ProgressView()
+                    Text(msg)
+                        .font(.custom("menlo", size: 15))
+                }                                        .opacity(0.5)
+            }
+        }
     }
 }
 struct webView: UIViewRepresentable {
@@ -113,8 +165,7 @@ struct webView: UIViewRepresentable {
         }
     }
 }
-func makeHTML(_ text: String) async -> String{
-    print(#function)
+func getHTML(_ text: String) async -> String{
     guard let myURL = URL(string: text) else {
         print("Error: \(text) doesn't seem to be a valid URL")
         return ""
@@ -129,40 +180,41 @@ func makeHTML(_ text: String) async -> String{
     }
     return ""
 }
-func beautify(_ text: String) -> String {
-    print(#function)
-    var modifiedText = ""
-    var tabs = 0
-    let regex = try! NSRegularExpression(pattern: "(</?[\\d\\w\",_ /:;!-={}']+>)")
-    var textAfterTag = ""
-    for match in regex.matches(in: text, range: NSRange(location: 0, length: text.count)) {
-        var rangeOfTag = Range(match.range,in: text)!
-        var tag: Substring
-        rangeOfTag = Range(match.range,in:text)!
-        tag = text[rangeOfTag]
-        for range in text.ranges(of: "<") {
-            if range.lowerBound >= rangeOfTag.upperBound{
-                textAfterTag = String(text[rangeOfTag.upperBound..<range.lowerBound])
-                break
+func beautify(_ text: String) async -> String {
+    await Task.detached {
+        var modifiedText = ""
+        var tabs = 0
+        let regex = try! NSRegularExpression(pattern: "(</?[\\d\\w\",_ /:;!-={}'\n&]+>)")
+        var textAfterTag = ""
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: text.count)) {
+            var rangeOfTag = Range(match.range,in: text)!
+            var tag: Substring
+            rangeOfTag = Range(match.range,in:text)!
+            tag = text[rangeOfTag]
+            for range in text.ranges(of: "<") {
+                if range.lowerBound >= rangeOfTag.upperBound{
+                    textAfterTag = String(text[rangeOfTag.upperBound..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    break
+                }
             }
-        }
-        if !tag.hasPrefix("</") && textAfterTag.isEmpty{
-            if text.contains("</"+tag[tag.index(tag.startIndex, offsetBy: 1)..<tag.endIndex]) {
+            if !tag.hasPrefix("</") && textAfterTag.isEmpty{
+                if text.contains("</"+tag[tag.index(tag.startIndex, offsetBy: 1)..<tag.endIndex]) {
+                    modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + tag + "\n"
+                    tabs += 1
+                }else{
+                    modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + tag + "\n"
+                }
+            }else if tag.hasPrefix("</"){
+                tabs -= 1
                 modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + tag + "\n"
-                tabs += 1
             }else{
                 modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + tag + "\n"
             }
-        }else if tag.hasPrefix("</"){
-            tabs -= 1
-            modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + tag + "\n"
-        }else{
-            modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + tag + "\n"
+            if !textAfterTag.isEmpty {
+                tabs += 1
+                modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + textAfterTag + "\n"
+            }
         }
-        if !textAfterTag.isEmpty {
-            tabs += 1
-            modifiedText += String(repeating: "\t",count: tabs >= 0 ? tabs : 0) + textAfterTag + "\n"
-        }
-    }
-    return modifiedText
+        return modifiedText
+    }.value
 }

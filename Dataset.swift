@@ -7,7 +7,7 @@ struct DataSet: Codable,Identifiable,Equatable {
     var id = UUID()
 }
 class DataSets: ObservableObject {
-    @Published var dataSets: [DataSet] = [DataSet(title: "hello", link: "", html: beautify("hello, world"))]
+    @Published var dataSets: [DataSet] = [DataSet(title: "hello", link: "", html: "hello, world")]
     private func getFileURL() throws -> URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("HTMLs")
