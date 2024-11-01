@@ -6,7 +6,7 @@ struct MyApp: App {
     var body: some Scene {
         WindowGroup {
             MyNavigationView(datasets: datasets)
-                .statusBar(hidden: false)
+                .statusBar(hidden: true)
                 .task {
                     datasets.load()
                 }
