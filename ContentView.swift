@@ -186,6 +186,7 @@ func beautify(_ text: String) async -> String {
         var tabs = 0
         let regex = try! NSRegularExpression(pattern: "(</?[\\d\\w\",_ /:;!-={}'\n&]+>)")
         var textAfterTag = ""
+        guard regex.matches(in: text, range: NSRange(location: 0, length: text.count)).count > 0 else {return text}
         for match in regex.matches(in: text, range: NSRange(location: 0, length: text.count)) {
             var rangeOfTag = Range(match.range,in: text)!
             var tag: Substring
